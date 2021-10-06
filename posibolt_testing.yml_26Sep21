@@ -1,0 +1,135 @@
+---
+- name: Posibolt Setup
+  hosts: pbolt
+  vars:
+
+        Seed_DB: Posibolt_SA_2021Mar1_1394.cdmp
+        DB_Name: test
+        Missing_SQL_File: navicareSQL_22JULY21.zip
+        Remote_Release_Path: /home/posibolt/Release
+        Postgres_Home: /opt/
+        User: posibolt
+        Adempiere_Ubuntu_zip: Adempiere.zip
+        Adempiere_CentOS_zip: Adempiere_Centos.zip
+        Adempiere_lib_file: Files.zip
+
+
+  tasks: 
+    
+    - name: creating postgres user
+      user:
+        name: postgres
+        password: 
+        state: present
+        shell: /bin/sh
+        system: no
+        createhome: yes
+        home: "{{ Postgres_Home }}/PostgreSQL"
+
+
+    - name: copying PostgreSQL zip file
+      copy: 
+        src: PostgreSQL.zip
+        dest: "{{ Postgres_Home }}"
+        owner: postgres
+        group: root
+        mode: 0644
+    
+    - name: Unzipin PostgreSQl file
+      ansible.builtin.unarchive:
+        src: "{{ Postgres_Home }}/PostgreSQL.zip"
+        dest: "{{ Postgres_Home }}"
+        owner: root
+        group: daemon
+        mode: 0755
+        remote_src: yes
+
+    - name: Changing data directory  ownership, group and permissions
+      ansible.builtin.file:
+        path: "{{ Postgres_Home }}/PostgreSQL/9.5/data/"
+        owner: postgres
+        group: postgres
+        mode: 0700
+        state: directory
+        recurse: yes
+
+    - name: copying service file to systemd of Ubuntu
+      copy:
+        src: postgresql-9.5.service
+        dest: /lib/systemd/system/
+        owner: root
+        group: root
+        mode: 0644
+      when: ansible_distribution == "Ubuntu"
+
+    - name: copying service file to systemd of Centos
+      copy:
+        src: postgresql-9.5.service
+        dest: /usr/lib/systemd/system/
+        owner: root
+        group: root
+        mode: 0644
+      when: ansible_distribution == "CentOS"
+
+    - name: Starting and enabling postgres service, if not started
+      ansible.builtin.service:
+        name: postgresql-9.5.service
+        state: started
+        enabled: yes
+    
+    - name: inserting Exporting details on /etc/profile  end of th line
+      lineinfile:
+        path: /etc/profile
+        line: "#####JAVA_PSQL###EXporting"
+
+    - name:
+      when: ansible_distribution == "Ubuntu"
+      blockinfile:
+        path: /etc/profile
+        insertafter: "#####JAVA_PSQL###EXporting"
+        block: |
+          export PATH=/usr/lib/jvm/java-8-openjdk-amd64/bin/:$PATH
+          export JAVA_HOME=/usr/lib/jvm/java-8-openjdk-amd64
+          export PATH=/opt/PostgreSQL/9.5/bin/:$PATH
+
+    - name:
+      when: ansible_distribution == "CentOS"
+      blockinfile:
+        path: /etc/profile
+        insertafter: "#####JAVA_PSQL###EXporting"
+        block: |
+          export PATH=/usr/lib/jvm/java-1.8.0-openjdk-1.8.0.302.b08-0.el8_4.x86_64/bin/:$PATH
+          export JAVA_HOME=/usr/lib/jvm/java-1.8.0-openjdk-1.8.0.302.b08-0.el8_4.x86_64
+          export PATH=/opt/PostgreSQL/9.5/bin/:$PATH
+
+    - name: creating adempiere user on postgres
+      shell: "{{ Postgres_Home }}/PostgreSQL/9.5/bin/createuser -s -U postgres adempiere"
+      args:
+        executable: /bin/bash
+
+
+  #- name: Check if database is available
+  #  become: true
+  #   become_user: postgres
+  #   shell: "pwd" 
+  #  #shell: psql -c '\l' | grep "{{ DB_Name }}"
+  #   register: dbstatus
+  #   failed_when: dbstatus.rc == 2
+  #
+    - name: chekig
+      shell: "{{ Postgres_Home }}/PostgreSQL/9.5/bin/psql -lqt | cut -d \ | -f 1 | grep -w {{ DB_Name }}"
+      become: true
+      become_user: postgres
+      register: command_out
+      failed_when: command_out.rc == 2
+    
+    - debug:
+        var: command_out.stdout_lines
+
+    - name: create db
+      shell: "{{ Postgres_Home }}/PostgreSQL/9.5/bin/createdb -U adempiere -E UTF8 -T template0 {{ DB_Name }}"
+      when: command_out.rc == 1
+      register: dbcreate_out
+
+    - debug: 
+        var: dbcreate_out.stdout_lines

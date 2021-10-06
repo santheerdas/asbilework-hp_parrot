@@ -1,0 +1,256 @@
+- name: Posibolt Setup
+  hosts: pbolt
+  tasks: 
+    - name: Creating posibolt  user
+      user:
+        name: posibolt
+        password: '$6$0b3k2PVg2ycD2sAH$H6d59AintgNlEiOy65sN2QuZU9F7ZHEHA68ppR0gGKr745sNv34Km5db/K376Hx6oq8nc4YZTmTFMMvCmAvJt/'
+        groups:              # Empty by default, here we give it some groups
+         # - docker
+         #- sudo
+        state: present
+        shell: /bin/bash       # Defaults to /bin/bash
+        system: no             # Defaults to no
+        createhome: yes        # Defaults to yes
+        home: /home/posibolt   # Defaults to /home/<username>
+
+    - name: install JAVA-8 ZIP vim for Ubuntu
+      apt: 
+        name: 
+          - openjdk-8-jdk
+          - zip
+          - vim  
+        statae: latest
+        update_cache: yes
+      when: ansible_distribution == "Ubuntu" 
+
+    - name: install JAVA-8 ZIP vim for Centos
+      yum:
+        name: 
+          - java-1.8.0-openjdk.x86_64
+          - java-1.8.0-openjdk-devel.x86_64
+          - zip
+          - vim   
+        state: latest
+        update_cache: yes
+      when: ansible_distribution == "CentOS"
+
+    - name: Creating Release directory
+      file:
+        path: /home/posibolt/Release
+        state: directory
+        owner: posibolt
+        group: posibolt
+        mode: 0775
+
+    - name: creating postgres user
+      user:
+        name: postgres
+        password: 
+        state: present
+        shell: /bin/sh
+        system: no
+        createhome: yes
+        home: /opt/PostgreSQL
+
+
+    - name: copying PostgreSQL zip file
+      copy: 
+        src: PostgreSQL.zip
+        dest: /opt/
+        owner: postgres
+        group: root
+        mode: 0644
+    
+    - name: Unzipin PostgreSQl file
+      ansible.builtin.unarchive:
+        src: /opt/PostgreSQL.zip
+        dest: /opt/
+        owner: root
+        group: daemon
+        mode: 0755
+        remote_src: yes
+
+    - name: Changing data directory  ownership, group and permissions
+      ansible.builtin.file:
+        path: /opt/PostgreSQL/9.5/data/
+        owner: postgres
+        group: postgres
+        mode: 0700
+        state: directory
+        recurse: yes
+
+    - name: copying service file to systemd of Ubuntu
+      copy:
+        src: postgresql-9.5.service
+        dest: /lib/systemd/system/
+        owner: root
+        group: root
+        mode: 0644
+      when: ansible_distribution == "Ubuntu"
+
+    - name: copying service file to systemd of Centos
+      copy:
+        src: postgresql-9.5.service
+        dest: /usr/lib/systemd/system/
+        owner: root
+        group: root
+        mode: 0644
+      when: ansible_distribution == "CentOS"
+
+    - name: Starting and enabling postgres service, if not started
+      ansible.builtin.service:
+        name: postgresql-9.5.service
+        state: started
+        enabled: yes
+    
+    - name: inserting Exporting details on /etc/profile  end of th line
+      lineinfile:
+        path: /etc/profile
+        line: "#####JAVA_PSQL###EXporting"
+
+    - name:
+      when: ansible_distribution == "Ubuntu"
+      blockinfile:
+        path: /etc/profile
+        insertafter: "#####JAVA_PSQL###EXporting"
+        block: |
+          export PATH=/usr/lib/jvm/java-8-openjdk-amd64/bin/:$PATH
+          export JAVA_HOME=/usr/lib/jvm/java-8-openjdk-amd64
+          export PATH=/opt/PostgreSQL/9.5/bin/:$PATH
+
+    - name:
+      when: ansible_distribution == "CentOS"
+      blockinfile:
+        path: /etc/profile
+        insertafter: "#####JAVA_PSQL###EXporting"
+        block: |
+          export PATH=/usr/lib/jvm/java-1.8.0-openjdk-1.8.0.302.b08-0.el8_4.x86_64/bin/:$PATH
+          export JAVA_HOME=/usr/lib/jvm/java-1.8.0-openjdk-1.8.0.302.b08-0.el8_4.x86_64
+          export PATH=/opt/PostgreSQL/9.5/bin/:$PATH
+
+    - name: creating adempiere user on postgres
+      shell: /opt/PostgreSQL/9.5/bin/createuser -s -U postgres adempiere
+      args:
+        executable: /bin/bash
+
+    - name: createing database
+      shell: /opt/PostgreSQL/9.5/bin/createdb -U adempiere -E UTF8 -T template0 test
+      args:
+        executable: /bin/bash
+
+    - name: copying seed db
+      copy:
+        src: Posibolt_SA_2021Mar1_1394.cdmp
+        dest: /home/posibolt/Release/
+
+    - name: restoring cdmp
+      shell: " /usr/bin/nohup /opt/PostgreSQL/9.5/bin/pg_restore -U adempiere -d test Posibolt_SA_2021Mar1_1394.cdmp & "
+      args:
+        chdir: /home/posibolt/Release/
+        executable: /bin/bash
+
+    - name: copying missing sql.zip folder
+      copy: 
+        src: navicareSQL_22JULY21.zip
+        dest: /home/posibolt/Release/
+
+    - name: Unziping mising sql file
+      ansible.builtin.unarchive:
+        src: /home/posibolt/Release/navicareSQL_22JULY21.zip
+        dest: /home/posibolt/Release/
+        remote_src: yes
+
+    - name: Changing missing SQL file  directory  ownership, group and permissions
+      ansible.builtin.file:
+        path: /home/posibolt/Release/navicareSQL_22JULY21/
+        owner: posibolt
+        group: posibolt
+        mode: 0755
+        state: directory
+        recurse: yes
+
+    - name: missing sql running
+      shell:
+        "./script.sh"
+      args:
+        chdir: "/home/posibolt/Release/navicareSQL_22JULY21/"
+
+    - name: copying Adempiere.zip folder to Ubuntu
+      copy: 
+        src: Adempiere.zip
+        dest: /home/posibolt/Release/
+      when: ansible_distribution == "Ubuntu"
+
+    - name: Unziping adempiere.zip in Ubuntu
+      ansible.builtin.unarchive:
+        src: /home/posibolt/Release/Adempiere.zip
+        dest: /home/posibolt/
+        owner: posibolt
+        group: posibolt
+        remote_src: yes
+      when: ansible_distribution == "Ubuntu"
+
+    - name: copying Adempiere.zip folder to CentOS
+      copy: 
+        src: Adempiere_Centos.zip
+        dest: /home/posibolt/Release/
+      when: ansible_distribution == "CentOS"
+
+    - name: Unziping adempiere.zip in Centos
+      ansible.builtin.unarchive:
+        src: /home/posibolt/Release/Adempiere_Centos.zip
+        dest: /home/posibolt/
+        owner: posibolt
+        group: posibolt
+        remote_src: yes
+      when: ansible_distribution == "CentOS"
+
+    - name: copying 5 files.zip folder
+      copy: 
+        src: Files.zip
+        dest: /home/posibolt/Release/
+
+    - name: Unarchive a file that is already on the remote machine
+      ansible.builtin.unarchive:
+        src: /home/posibolt/Release/Files.zip
+        dest: /home/posibolt/Release/
+        owner: posibolt
+        group: posibolt
+        mode: 0755
+        remote_src: yes
+
+    - name: deploying 5 files
+      shell: cp -r *  /home/posibolt/Adempiere/lib/
+      args:
+        chdir: /home/posibolt/Release/Files/
+        executable: /bin/bash
+
+    - name: silent setup
+      shell: 
+        "./RUN_silentsetup.sh >> silentout.txt"
+      args:
+        chdir: /home/posibolt/Adempiere
+        executable: /bin/bash
+
+
+    - name: Recursively change ownership of a directory
+      ansible.builtin.file:
+        path: /home/posibolt/Adempiere
+        state: directory
+        recurse: yes
+        owner: posibolt
+        group: posibolt 
+
+
+    - name: adempiere starting
+      become: true
+      become_user: posibolt
+      shell:
+        "/usr/bin/nohup ./RUN_Server2.sh  &"
+      args:
+        chdir: /home/posibolt/Adempiere/utils/
+        executable: /bin/bash
+
+
+

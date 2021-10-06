@@ -1,0 +1,119 @@
+
+---
+- name: Posibolt Setup
+  hosts: pbolt
+  tasks: 
+    - name: Creating posibolt  user
+      user:
+        name: posibolt
+        password: '$6$0b3k2PVg2ycD2sAH$H6d59AintgNlEiOy65sN2QuZU9F7ZHEHA68ppR0gGKr745sNv34Km5db/K376Hx6oq8nc4YZTmTFMMvCmAvJt/'
+        groups:              # Empty by default, here we give it some groups
+         # - docker
+         #- sudo
+        state: present
+        shell: /bin/bash       # Defaults to /bin/bash
+        system: no             # Defaults to no
+        createhome: yes        # Defaults to yes
+        home: /home/posibolt   # Defaults to /home/<username>
+        
+    - name: update cache before install  #Cache clearing in apt
+      apt: update_cache=yes
+
+    - name: java-8 installing
+      apt: 
+        name: openjdk-8-jdk 
+        state: present
+
+    - name: zip installing
+      apt: 
+        name: zip 
+        state: latest
+
+    - name: Creating Release directory
+      file:
+        path: /home/posibolt/Release
+        state: directory
+        owner: posibolt
+        group: posibolt
+        mode: 0775
+
+    - name: creating postgres user
+      user:
+        name: postgres
+        password: 
+        state: present
+        shell: /bin/sh
+        system: no
+        createhome: yes
+        home: /opt/PostgreSQL
+
+    - name: copying postgres folder
+      copy: 
+        src: /home/santheer/Ansible_pbolt/PostgreSQL.zip
+        dest: /opt/
+        owner: postgres
+        group: root
+        mode: 0644
+    
+    - name: Unarchive a file that is already on the remote machine
+      ansible.builtin.unarchive:
+        src: /opt/PostgreSQL.zip
+        dest: /opt/
+        owner: root
+        group: daemon
+        mode: 0755
+        remote_src: yes
+
+
+    - name: Change data directory  ownership, group and permissions
+      ansible.builtin.file:
+        path: /opt/PostgreSQL/9.5/data/
+        owner: postgres
+        group: postgres
+        mode: 0700
+        state: directory
+        recurse: yes
+        #remote_src: yes
+
+
+
+
+
+    - name: copying service file to systemd
+      copy:
+        src: /home/santheer/Ansible_pbolt/postgresql-9.5.service
+        dest: /lib/systemd/system/
+        owner: root
+        group: root
+        mode: 0644
+    
+    - name: Starting postgres service, if not started
+      ansible.builtin.service:
+        name: postgresql-9.5.service
+        state: started
+        enabled: yes
+
+
+    - name: insert end of th line
+      lineinfile:
+        path: /etc/profile
+        line: "#####JAVA_PSQL###EXporting"
+
+    - name:
+      blockinfile:
+        path: /etc/profile
+        insertafter: "#####JAVA_PSQL###EXporting"
+        block: |
+          export PATH=/usr/lib/jvm/java-8-openjdk-amd64/bin/:$PATH
+          export JAVA_HOME=/usr/lib/jvm/java-8-openjdk-amd64
+          export PATH=/opt/PostgreSQL/9.5/bin/:$PATH
+
+
+    - name: Source the /etc/profile file
+      ansible.builtin.shell: source /etc/profile
+      args:
+        executable: /bin/bash
+
+
+
+

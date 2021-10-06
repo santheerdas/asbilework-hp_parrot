@@ -1,0 +1,271 @@
+
+
+- name: Posibolt Setup
+  hosts: pbolt
+
+  vars:
+        User: posibolt
+        Adempiere_Ubuntu_zip: Adempiere.zip
+        Adempiere_CentOS_zip: Adempiere_Centos.zip
+        Postgres_Home: /opt/
+        Seed_DB: Posibolt_SA_2021Mar1_1394.cdmp
+        DB_Name: test
+        Missing_SQL_File: navicareSQL_22JULY21.zip
+        Adempiere_lib_file: Files.zip
+        Remote_Release_Path: /home/posibolt/Release
+        
+
+  tasks: 
+    - name: Creating posibolt  user
+      user: 
+        name: "{{ User }}"
+        password: '$6$0b3k2PVg2ycD2sAH$H6d59AintgNlEiOy65sN2QuZU9F7ZHEHA68ppR0gGKr745sNv34Km5db/K376Hx6oq8nc4YZTmTFMMvCmAvJt/'
+        groups:              # Empty by default, here we give it some groups
+         # - docker
+         #- sudo
+        state: present
+        shell: /bin/bash       # Defaults to /bin/bash
+        system: no             # Defaults to no
+        createhome: yes        # Defaults to yes
+        home: "/home/{{ User }}"   # Defaults to /home/<username>
+
+    - name: install JAVA-8 ZIP vim for Ubuntu
+      apt: 
+        name: 
+          - openjdk-8-jdk
+          - zip
+          - vim  
+        statae: latest
+        update_cache: yes
+      when: ansible_distribution == "Ubuntu" 
+
+    - name: install JAVA-8 ZIP vim for Centos
+      yum:
+        name: 
+          - java-1.8.0-openjdk.x86_64
+          - java-1.8.0-openjdk-devel.x86_64
+          - zip
+          - vim   
+        state: latest
+        update_cache: yes
+      when: ansible_distribution == "CentOS"
+
+    - name: Creating Release directory
+      file:
+        path: "{{ Remote_Release_Path }}"
+        state: directory
+        owner: "{{ User }}"
+        group: "{{ User }}"
+        mode: 0775
+
+    - name: creating postgres user
+      user:
+        name: postgres
+        password: 
+        state: present
+        shell: /bin/sh
+        system: no
+        createhome: yes
+        home: "{{ Postgres_Home }}/PostgreSQL"
+
+
+    - name: copying PostgreSQL zip file
+      copy: 
+        src: PostgreSQL.zip
+        dest: "{{ Postgres_Home }}"
+        owner: postgres
+        group: root
+        mode: 0644
+    
+    - name: Unzipin PostgreSQl file
+      ansible.builtin.unarchive:
+        src: "{{ Postgres_Home }}/PostgreSQL.zip"
+        dest: "{{ Postgres_Home }}"
+        owner: root
+        group: daemon
+        mode: 0755
+        remote_src: yes
+
+    - name: Changing data directory  ownership, group and permissions
+      ansible.builtin.file:
+        path: "{{ Postgres_Home }}/PostgreSQL/9.5/data/"
+        owner: postgres
+        group: postgres
+        mode: 0700
+        state: directory
+        recurse: yes
+
+    - name: copying service file to systemd of Ubuntu
+      copy:
+        src: postgresql-9.5.service
+        dest: /lib/systemd/system/
+        owner: root
+        group: root
+        mode: 0644
+      when: ansible_distribution == "Ubuntu"
+
+    - name: copying service file to systemd of Centos
+      copy:
+        src: postgresql-9.5.service
+        dest: /usr/lib/systemd/system/
+        owner: root
+        group: root
+        mode: 0644
+      when: ansible_distribution == "CentOS"
+
+    - name: Starting and enabling postgres service, if not started
+      ansible.builtin.service:
+        name: postgresql-9.5.service
+        state: started
+        enabled: yes
+    
+    - name: inserting Exporting details on /etc/profile  end of th line
+      lineinfile:
+        path: /etc/profile
+        line: "#####JAVA_PSQL###EXporting"
+
+    - name:
+      when: ansible_distribution == "Ubuntu"
+      blockinfile:
+        path: /etc/profile
+        insertafter: "#####JAVA_PSQL###EXporting"
+        block: |
+          export PATH=/usr/lib/jvm/java-8-openjdk-amd64/bin/:$PATH
+          export JAVA_HOME=/usr/lib/jvm/java-8-openjdk-amd64
+          export PATH=/opt/PostgreSQL/9.5/bin/:$PATH
+
+    - name:
+      when: ansible_distribution == "CentOS"
+      blockinfile:
+        path: /etc/profile
+        insertafter: "#####JAVA_PSQL###EXporting"
+        block: |
+          export PATH=/usr/lib/jvm/java-1.8.0-openjdk-1.8.0.302.b08-0.el8_4.x86_64/bin/:$PATH
+          export JAVA_HOME=/usr/lib/jvm/java-1.8.0-openjdk-1.8.0.302.b08-0.el8_4.x86_64
+          export PATH=/opt/PostgreSQL/9.5/bin/:$PATH
+
+    - name: creating adempiere user on postgres
+      shell: "{{ Postgres_Home }}/PostgreSQL/9.5/bin/createuser -s -U postgres adempiere"
+      args:
+        executable: /bin/bash
+
+    - name: createing database
+      shell: "{{ Postgres_Home }}/PostgreSQL/9.5/bin/createdb -U adempiere -E UTF8 -T template0 {{ DB_Name }}"
+      args:
+        executable: /bin/bash
+
+    - name: copying seed db
+      copy:
+        src: "{{ Seed_DB }}"
+        dest: "{{ Remote_Release_Path }}"
+
+    - name: restoring cdmp
+      shell: "/usr/bin/nohup {{ Postgres_Home }}/PostgreSQL/9.5/bin/pg_restore -U adempiere -d {{ DB_Name }} {{ Seed_DB }}"
+      args:
+        chdir: "{{ Remote_Release_Path }}"
+        executable: /bin/bash
+
+    - name: copying missing sql.zip folder
+      copy: 
+        src: "{{ Missing_SQL_File }}"
+        dest: "{{ Remote_Release_Path }}"
+
+    - name: Unziping mising sql file
+      ansible.builtin.unarchive:
+        src: "{{ Remote_Release_Path  }}/{{Missing_SQL_File}}"
+        dest: "{{ Remote_Release_Path  }}"
+        remote_src: yes
+
+    - name: Changing missing SQL file  directory  ownership, group and permissions
+      ansible.builtin.file:
+        path: "{{ Remote_Release_Path }}/navicareSQL_22JULY21/"
+        owner: "{{ User }}"
+        group: "{{ User }}"
+        mode: 0755
+        state: directory
+        recurse: yes
+
+    - name: missing sql running
+      shell:
+        "./script.sh"
+      args:
+        chdir: "{{ Remote_Release_Path }}/navicareSQL_22JULY21/"
+
+    - name: copying Adempiere.zip folder to Ubuntu
+      copy: 
+        src: "{{ Adempiere_Ubuntu_zip }}"
+        dest: "{{ Remote_Release_Path }}"
+      when: ansible_distribution == "Ubuntu"
+
+    - name: Unziping adempiere.zip in Ubuntu
+      ansible.builtin.unarchive:
+        src: "{{ Remote_Release_Path }}/{{ Adempiere_Ubuntu_zip }}"
+        dest: "/home/{{ User }}"
+        owner: "{{ User }}"
+        group: "{{ User }}"
+        remote_src: yes
+      when: ansible_distribution == "Ubuntu"
+
+    - name: copying Adempiere.zip folder to CentOS
+      copy: 
+        src: "{{ Adempiere_CentOS_zip  }}"
+        dest: "{{ Remote_Release_Path  }}"
+      when: ansible_distribution == "CentOS"
+
+    - name: Unziping adempiere.zip in Centos
+      ansible.builtin.unarchive:
+        src: "{{ Remote_Release_Path  }}/{{ Adempiere_CentOS_zip  }}"
+        dest: "/home/{{ User }}"
+        owner: "{{ User }}"
+        group: "{{ User }}"
+        remote_src: yes
+      when: ansible_distribution == "CentOS"
+
+    - name: copying 5 files.zip folder
+      copy: 
+        src: "{{ Adempiere_lib_file }}"
+        dest: "{{ Remote_Release_Path  }}"
+
+    - name: Unarchive a file that is already on the remote machine
+      ansible.builtin.unarchive:
+        src: "{{ Remote_Release_Path }}/{{ Adempiere_lib_file }}"
+        dest: "{{ Remote_Release_Path  }}"
+        owner: "{{ User }}"
+        group: "{{ User }}"
+        mode: 0755
+        remote_src: yes
+
+    - name: deploying 5 files
+      shell: cp -r *  "/home/{{ User }}/Adempiere/lib/"
+      args:
+        chdir: "/home/{{ User }}/Release/Files/"
+        executable: /bin/bash
+
+    - name: silent setup
+      shell: 
+        "./RUN_silentsetup.sh >> silentout.txt"
+      args:
+        chdir: "/home/{{ User }}/Adempiere"
+        executable: /bin/bash
+
+
+    - name: Recursively change ownership of a directory
+      ansible.builtin.file:
+        path: "/home/{{  User }}/Adempiere"
+        state: directory
+        recurse: yes
+        owner: "{{ User }}"
+        group: "{{ User }}" 
+
+
+    - name: adempiere starting
+      become: true
+      become_user: "{{ User }}"
+      shell:
+        "/usr/bin/nohup ./RUN_Server2.sh  &"
+      args:
+        chdir: "/home/{{ User }}/Adempiere/utils/"
+        executable: /bin/bash
+
+
+
